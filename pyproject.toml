@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photolayout"
+version = "0.1.0"
+description = "基于人像检测的证件照处理与 6 寸相纸排版工具"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mediapipe",
+    "numpy",
+    "opencv-python",
+    "Pillow",
+    "rembg",
+    "reportlab",
+]
+
+[project.scripts]
+photolayout = "photolayout.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["photolayout*"]
