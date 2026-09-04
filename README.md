@@ -208,7 +208,7 @@ python -m unittest discover -s tests -v
 - 🍴 **Fork** 一份，定制属于你自己的证件照工具
 - 📢 **分享**给身边需要证件照的朋友
 
-[![Star History Chart](https://api.star-history.com/svg?repos=your-username/photolayout&type=Date)](https://star-history.com/#your-username/photolayout&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=wxlv/photolayout&type=Date)](https://star-history.com/#your-username/photolayout&Date)
 
 ## 📄 许可证
 
