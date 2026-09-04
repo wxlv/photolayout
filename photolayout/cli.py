@@ -2,6 +2,7 @@
 
 import logging
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -50,8 +51,14 @@ def _safe_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*\s]+', "-", name).strip("-")
 
 
-def main() -> None:
-    """运行交互式证件照生成流程。"""
+def main(argv: list[str] | None = None) -> None:
+    """运行交互式证件照生成流程，--web 启动 Web 界面。"""
+    if argv is None:
+        argv = sys.argv[1:]
+    if "--web" in argv:
+        from .webui import launch_webui
+        launch_webui()
+        return
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     print("=" * 58)
     print("   证件照自动排版工具（人脸识别 + 头部占比微调 + PDF切割线）")

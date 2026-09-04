@@ -17,6 +17,9 @@ dependencies = [
     "reportlab",
 ]
 
+[project.optional-dependencies]
+web = ["gradio"]
+
 [project.scripts]
 photolayout = "photolayout.cli:main"
 
