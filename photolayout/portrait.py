@@ -54,9 +54,15 @@ def straighten_portrait(image: Image.Image, min_angle: float = 2.5,
     return Image.fromarray(rotated, "RGBA")
 
 
+def check_headroom(face_y: int, face_height: int, expand_top: float) -> bool:
+    """原图头顶留白是否满足目标规格的头顶扩展要求。"""
+    return face_y - face_height * expand_top >= 0
+
+
 def detect_and_crop_face(image: Image.Image, target_ratio: float,
                          expand_top: float = 0.70, expand_bottom: float = 0.50,
-                         expand_side: float = 0.32) -> Image.Image:
+                         expand_side: float = 0.32,
+                         warnings: list[str] | None = None) -> Image.Image:
     """按人脸和双肩关键点裁剪，未识别到双肩时回退到人脸框。"""
     rgb_image = np.array(image.convert("RGB"))
     height, width = rgb_image.shape[:2]
@@ -76,6 +82,11 @@ def detect_and_crop_face(image: Image.Image, target_ratio: float,
     y = int(bounding_box.ymin * height)
     face_width = int(bounding_box.width * width)
     face_height = int(bounding_box.height * height)
+
+    if warnings is not None and not check_headroom(y, face_height, expand_top):
+        warnings.append(
+            "原图头顶空间不足，成片可能缺少完整头顶；建议换一张头顶留白更多的照片。"
+        )
 
     with mp.solutions.pose.Pose(
         static_image_mode=True, model_complexity=1, min_detection_confidence=0.5
@@ -135,6 +146,91 @@ def _crop_with_face_box(image: Image.Image, x: int, y: int, face_width: int,
     y2 = min(image_height, y + face_height + int(face_height * expand_bottom))
     logger.info("未可靠检测到双肩，已使用人脸框裁剪")
     return image.crop((x1, y1, x2, y2))
+
+
+def measure_band_width_ratio(alpha: np.ndarray, split_y: int) -> float:
+    """量测 split_y 以下区域人像横向覆盖宽度占整图宽度的比例。"""
+    if split_y >= alpha.shape[0]:
+        return 0.0
+    band = alpha[split_y:]
+    occupied = np.argwhere((band > 0).any(axis=0))
+    if occupied.size == 0:
+        return 0.0
+    return (occupied.max() - occupied.min() + 1) / alpha.shape[1]
+
+
+def stretch_band(image: Image.Image, split_y: int, factor: float) -> Image.Image:
+    """对 split_y 以下区域的内容做横向拉伸（中心锚定），头部保持不变。"""
+    if factor <= 1.0 or split_y >= image.height:
+        return image
+    head = image.crop((0, 0, image.width, split_y))
+    body = image.crop((0, split_y, image.width, image.height))
+    body_alpha = np.array(body.getchannel("A"))
+    columns = np.argwhere((body_alpha > 0).any(axis=0))
+    if columns.size == 0:
+        return image
+    content_left, content_right = int(columns.min()), int(columns.max()) + 1
+    content = body.crop((content_left, 0, content_right, body.height))
+    content_width = content_right - content_left
+    target_width = min(
+        max(int(round(content_width * factor)), content_width + 1),
+        image.width,
+    )
+    content = content.resize((target_width, content.height), Image.LANCZOS)
+    # LANCZOS 会在内容边缘产生 alpha 渐隐，阈值化保持干净的肩部边缘
+    stretched_alpha = np.array(content.getchannel("A"))
+    content.putalpha(Image.fromarray(np.where(stretched_alpha > 128, 255, 0).astype(np.uint8)))
+    new_body = Image.new("RGBA", body.size, (0, 0, 0, 0))
+    new_body.paste(content, ((image.width - target_width) // 2, 0))
+    result = image.copy()
+    result.paste(head, (0, 0))
+    result.paste(new_body, (0, split_y))
+    return result
+
+
+def widen_shoulder_band(subject: Image.Image, reference_image: Image.Image,
+                        min_ratio: float = 0.72,
+                        max_stretch: float = 1.35) -> tuple[Image.Image, str | None]:
+    """量测肩部带人像宽度占比，不足时对下巴以下区域受控横向拉伸。
+
+    返回 (处理后的图像, 告警文案或 None)。
+    """
+    rgb_image = np.array(reference_image.convert("RGB"))
+    height, width = rgb_image.shape[:2]
+    with mp.solutions.face_detection.FaceDetection(
+        model_selection=1, min_detection_confidence=0.5
+    ) as detector:
+        face_results = detector.process(rgb_image)
+
+    alpha = np.array(subject.getchannel("A"))
+    if face_results.detections:
+        face = max(face_results.detections, key=lambda detection: detection.score[0])
+        bounding_box = face.location_data.relative_bounding_box
+        face_height = int(bounding_box.height * height)
+        split_y = int((bounding_box.ymin + bounding_box.height) * height + face_height * 0.1)
+        split_y = min(split_y, height - 1)
+        ratio = measure_band_width_ratio(alpha, split_y)
+        if ratio >= min_ratio:
+            return subject, None
+        factor = min(min_ratio / max(ratio, 1e-6), max_stretch)
+        if factor > 1.0:
+            subject = stretch_band(subject, split_y, factor)
+            ratio = measure_band_width_ratio(
+                np.array(subject.getchannel("A")), split_y
+            )
+            logger.info("肩部占比 %.0f%%，已对肩部以下区域横向拉伸 %.2f 倍", ratio * 100, factor)
+        if ratio < min_ratio:
+            return subject, (
+                "原图肩部占比过小，已尽力补全但仍未填满两侧；"
+                "建议换一张包含完整肩部的照片。"
+            )
+        return subject, None
+
+    if measure_band_width_ratio(alpha, height // 2) < min_ratio:
+        return subject, (
+            "原图肩部占比过小，可能无法填满照片两侧；建议换一张包含完整肩部的照片。"
+        )
+    return subject, None
 
 
 def trim_body_below_shoulders(subject: Image.Image, reference_image: Image.Image) -> Image.Image:

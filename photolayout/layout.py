@@ -10,7 +10,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
-from .config import DPI, GAP_MM, MARGIN_MM, PAPER_SIZE_MM
+from .config import DPI, GAP_MM, MARGIN_MM
 
 
 logger = logging.getLogger(__name__)
@@ -42,11 +42,12 @@ def resize_to_size(image: Image.Image, width_mm: int, height_mm: int,
 
 
 def layout_on_paper(image: Image.Image, width_mm: int, height_mm: int,
+                    paper_size_mm: tuple[int, int],
                     draw_cut_lines: bool = True) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
-    """将照片以最大张数排版到 6 寸相纸，可选绘制切割线。"""
+    """将照片以最大张数排版到指定相纸，可选绘制切割线。"""
     photo = resize_to_size(image, width_mm, height_mm)
-    paper_width = mm_to_px(PAPER_SIZE_MM[0])
-    paper_height = mm_to_px(PAPER_SIZE_MM[1])
+    paper_width = mm_to_px(paper_size_mm[0])
+    paper_height = mm_to_px(paper_size_mm[1])
     gap = mm_to_px(GAP_MM)
     margin = mm_to_px(MARGIN_MM)
     usable_width = paper_width - 2 * margin
@@ -64,7 +65,10 @@ def layout_on_paper(image: Image.Image, width_mm: int, height_mm: int,
     copy_count, _, orientation, photo, columns, rows = max(
         candidates, key=lambda candidate: (candidate[0], candidate[1])
     )
-    logger.info("6寸相纸最佳排版（%s）：%s列 × %s行 = %s 张", orientation, columns, rows, copy_count)
+    logger.info(
+        "%s×%smm 相纸最佳排版（%s）：%s列 × %s行 = %s 张",
+        paper_size_mm[0], paper_size_mm[1], orientation, columns, rows, copy_count,
+    )
     paper = Image.new("RGB", (paper_width, paper_height), (255, 255, 255))
     total_width = columns * photo.width + (columns - 1) * gap
     total_height = rows * photo.height + (rows - 1) * gap
@@ -114,7 +118,7 @@ def _draw_cut_lines(paper: Image.Image, positions: list[tuple[int, int, int, int
 
 
 def save_pdf_with_cut_lines(paper_image: Image.Image, output_path: str | Path,
-                            paper_size_mm: tuple[int, int] = PAPER_SIZE_MM) -> None:
+                            paper_size_mm: tuple[int, int]) -> None:
     """将排版图导出为真实物理尺寸的 PDF。"""
     width_pt, height_pt = paper_size_mm[0] * mm, paper_size_mm[1] * mm
     pdf = canvas.Canvas(str(output_path), pagesize=(width_pt, height_pt))
