@@ -1,6 +1,6 @@
-mediapipe
+mediapipe>=1.0.1
 numpy
-opencv-python
+opencv-contrib-python
 Pillow
-rembg
+rembg[cpu]>=2.0
 reportlab

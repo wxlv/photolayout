@@ -3,9 +3,10 @@
 import logging
 
 import cv2
-import mediapipe as mp
 import numpy as np
 from PIL import Image
+
+from .detection import detect_eye_line, detect_faces, detect_shoulders
 
 
 logger = logging.getLogger(__name__)
@@ -18,22 +19,13 @@ def straighten_portrait(image: Image.Image, min_angle: float = 2.5,
     height, width = image_array.shape[:2]
     rgb_image = cv2.cvtColor(image_array, cv2.COLOR_RGBA2RGB)
 
-    with mp.solutions.face_mesh.FaceMesh(
-        static_image_mode=True, max_num_faces=1, min_detection_confidence=0.5
-    ) as face_mesh:
-        results = face_mesh.process(rgb_image)
-
-    if not results.multi_face_landmarks:
+    eye_line = detect_eye_line(rgb_image)
+    if eye_line is None:
         logger.info("未检测到清晰人脸，跳过人像扶正")
         return image
 
-    landmarks = results.multi_face_landmarks[0].landmark
-    left_eye = landmarks[133]
-    right_eye = landmarks[362]
-    eye_angle = np.degrees(np.arctan2(
-        (right_eye.y - left_eye.y) * height,
-        (right_eye.x - left_eye.x) * width,
-    ))
+    (left_x, left_y), (right_x, right_y) = eye_line
+    eye_angle = np.degrees(np.arctan2(right_y - left_y, right_x - left_x))
 
     if abs(eye_angle) < min_angle:
         logger.info("人像倾斜角度较小，跳过扶正")
@@ -65,45 +57,31 @@ def detect_and_crop_face(image: Image.Image, target_ratio: float,
                          warnings: list[str] | None = None) -> Image.Image:
     """按人脸和双肩关键点裁剪，未识别到双肩时回退到人脸框。"""
     rgb_image = np.array(image.convert("RGB"))
-    height, width = rgb_image.shape[:2]
 
-    with mp.solutions.face_detection.FaceDetection(
-        model_selection=1, min_detection_confidence=0.5
-    ) as detector:
-        results = detector.process(rgb_image)
-
-    if not results.detections:
+    faces = detect_faces(rgb_image)
+    if not faces:
         logger.info("未检测到人脸，将使用整张图片")
         return image
 
-    face = max(results.detections, key=lambda detection: detection.score[0])
-    bounding_box = face.location_data.relative_bounding_box
-    x = int(bounding_box.xmin * width)
-    y = int(bounding_box.ymin * height)
-    face_width = int(bounding_box.width * width)
-    face_height = int(bounding_box.height * height)
+    face = faces[0]
+    x = face.x
+    y = face.y
+    face_width = face.width
+    face_height = face.height
 
     if warnings is not None and not check_headroom(y, face_height, expand_top):
         warnings.append(
             "原图头顶空间不足，成片可能缺少完整头顶；建议换一张头顶留白更多的照片。"
         )
 
-    with mp.solutions.pose.Pose(
-        static_image_mode=True, model_complexity=1, min_detection_confidence=0.5
-    ) as pose:
-        pose_results = pose.process(rgb_image)
-
-    if pose_results.pose_landmarks:
-        landmarks = pose_results.pose_landmarks.landmark
-        left_shoulder = landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER]
-        right_shoulder = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER]
-        if left_shoulder.visibility >= 0.5 and right_shoulder.visibility >= 0.5:
-            return _crop_with_shoulders(
-                image, target_ratio, x, y, face_width, face_height,
-                left_shoulder.x * width, left_shoulder.y * height,
-                right_shoulder.x * width, right_shoulder.y * height,
-                expand_top, expand_side,
-            )
+    shoulders = detect_shoulders(rgb_image)
+    if shoulders is not None:
+        (left_x, left_y), (right_x, right_y) = shoulders
+        return _crop_with_shoulders(
+            image, target_ratio, x, y, face_width, face_height,
+            left_x, left_y, right_x, right_y,
+            expand_top, expand_side,
+        )
 
     return _crop_with_face_box(
         image, x, y, face_width, face_height, expand_top, expand_bottom, expand_side,
@@ -196,18 +174,14 @@ def widen_shoulder_band(subject: Image.Image, reference_image: Image.Image,
     返回 (处理后的图像, 告警文案或 None)。
     """
     rgb_image = np.array(reference_image.convert("RGB"))
-    height, width = rgb_image.shape[:2]
-    with mp.solutions.face_detection.FaceDetection(
-        model_selection=1, min_detection_confidence=0.5
-    ) as detector:
-        face_results = detector.process(rgb_image)
+    height = rgb_image.shape[0]
+    faces = detect_faces(rgb_image)
 
     alpha = np.array(subject.getchannel("A"))
-    if face_results.detections:
-        face = max(face_results.detections, key=lambda detection: detection.score[0])
-        bounding_box = face.location_data.relative_bounding_box
-        face_height = int(bounding_box.height * height)
-        split_y = int((bounding_box.ymin + bounding_box.height) * height + face_height * 0.1)
+    if faces:
+        face = faces[0]
+        face_height = face.height
+        split_y = int(face.y + face.height + face_height * 0.1)
         split_y = min(split_y, height - 1)
         ratio = measure_band_width_ratio(alpha, split_y)
         if ratio >= min_ratio:
@@ -237,29 +211,17 @@ def trim_body_below_shoulders(subject: Image.Image, reference_image: Image.Image
     """保留肩部下方少量区域，并将人像底边对齐到画面底部。"""
     rgb_image = np.array(reference_image.convert("RGB"))
     height, width = rgb_image.shape[:2]
-    with mp.solutions.face_detection.FaceDetection(
-        model_selection=1, min_detection_confidence=0.5
-    ) as detector:
-        face_results = detector.process(rgb_image)
-    if not face_results.detections:
+    faces = detect_faces(rgb_image)
+    if not faces:
         return subject
 
-    face = max(face_results.detections, key=lambda detection: detection.score[0])
-    face_height = int(face.location_data.relative_bounding_box.height * height)
-    with mp.solutions.pose.Pose(
-        static_image_mode=True, model_complexity=1, min_detection_confidence=0.5
-    ) as pose:
-        pose_results = pose.process(rgb_image)
-    if not pose_results.pose_landmarks:
+    face_height = faces[0].height
+    shoulders = detect_shoulders(rgb_image)
+    if shoulders is None:
         return subject
 
-    landmarks = pose_results.pose_landmarks.landmark
-    left_shoulder = landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER]
-    right_shoulder = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER]
-    if left_shoulder.visibility < 0.5 or right_shoulder.visibility < 0.5:
-        return subject
-
-    cutoff_y = min(height, int(max(left_shoulder.y, right_shoulder.y) * height + face_height * 0.13))
+    (_, left_y), (_, right_y) = shoulders
+    cutoff_y = min(height, int(max(left_y, right_y) + face_height * 0.13))
     alpha = np.array(subject.getchannel("A"), copy=True)
     alpha[cutoff_y:] = 0
     trimmed = subject.copy()
@@ -279,20 +241,15 @@ def enhance_portrait(image: Image.Image) -> Image.Image:
     """对人脸区域自然降噪，并在低光照时提亮。"""
     rgb_image = np.array(image.convert("RGB"))
     height, width = rgb_image.shape[:2]
-    with mp.solutions.face_detection.FaceDetection(
-        model_selection=1, min_detection_confidence=0.5
-    ) as detector:
-        results = detector.process(rgb_image)
-    if not results.detections:
+    faces = detect_faces(rgb_image)
+    if not faces:
         logger.info("未检测到人脸，跳过照片增强")
         return image
 
-    face = max(results.detections, key=lambda detection: detection.score[0])
-    bounding_box = face.location_data.relative_bounding_box
-    center = (int((bounding_box.xmin + bounding_box.width / 2) * width),
-              int((bounding_box.ymin + bounding_box.height / 2) * height))
-    axes = (max(1, int(bounding_box.width * width * 0.70)),
-            max(1, int(bounding_box.height * height * 0.78)))
+    face = faces[0]
+    center = (int(face.x + face.width / 2), int(face.y + face.height / 2))
+    axes = (max(1, int(face.width * 0.70)),
+            max(1, int(face.height * 0.78)))
     face_mask = np.zeros((height, width), dtype=np.uint8)
     cv2.ellipse(face_mask, center, axes, 0, 0, 360, 255, -1)
     face_mask = cv2.GaussianBlur(face_mask, (0, 0), max(2, axes[0] // 6))

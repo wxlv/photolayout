@@ -9,11 +9,11 @@ description = "基于人像检测的证件照处理与 6 寸相纸排版工具"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mediapipe",
+    "mediapipe>=1.0.1",
     "numpy",
-    "opencv-python",
+    "opencv-contrib-python",
     "Pillow",
-    "rembg",
+    "rembg[cpu]>=2.0",
     "reportlab",
 ]
 

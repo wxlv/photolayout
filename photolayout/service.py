@@ -6,8 +6,10 @@ from pathlib import Path
 from PIL import Image, ImageEnhance
 from rembg import remove
 
+from . import detection
 from .config import MAX_SHOULDER_STRETCH, MIN_SHOULDER_WIDTH_RATIO
 from .models import PhotoResult, PhotoSize
+from .rembg_session import get_session
 from .portrait import (
     detect_and_crop_face,
     enhance_portrait,
@@ -27,6 +29,12 @@ def process_photo(input_path: str | Path, photo_size: PhotoSize,
     warnings: list[str] = []
     image = Image.open(input_path).convert("RGBA")
     image = straighten_portrait(image)
+    reason = detection.unavailable_reason()
+    if reason:
+        warnings.append(
+            "AI 构图功能不可用：" + reason + "。将按整图处理输出，头部占比可能不合规；"
+            "请联网后重试，或参照 README「常见问题」手动放置模型后再次运行。"
+        )
     logger.info("正在进行人脸识别与智能裁剪（根据尺寸微调头部占比）...")
     image = detect_and_crop_face(
         image, photo_size.aspect_ratio, photo_size.expand_top,
@@ -35,7 +43,8 @@ def process_photo(input_path: str | Path, photo_size: PhotoSize,
     )
     logger.info("正在去除背景...")
     foreground = remove(
-        image, alpha_matting=True, alpha_matting_foreground_threshold=240,
+        image, session=get_session(), alpha_matting=True,
+        alpha_matting_foreground_threshold=240,
         alpha_matting_background_threshold=10, alpha_matting_erode_size=3,
         decontaminate=True,
     )

@@ -103,7 +103,7 @@ photolayout --web        # 或 python main.py --web
 - **图片交互**：上传图与结果图自动缩放适配显示区，点击可看大图，⟳ 按钮可预览旋转
 - **构图告警**：头顶不足 / 肩部过窄等问题在页面上直接以 ⚠️ 提示
 
-> 💡 首次运行时，MediaPipe 和 rembg 会自动下载 AI 模型，请耐心等待；之后的运行无需再下载。
+> 💡 首次运行时，MediaPipe 人脸/姿态模型（约 14MB，缓存于 `~/.photolayout/models`）与 rembg 抠图模型会自动下载，请耐心等待；之后的运行无需再下载。若模型下载失败，程序会自动降级为「整图处理」并在结果中给出 ⚠️ 提示（见文末常见问题）。
 
 ## 📖 使用流程
 
@@ -137,6 +137,53 @@ graph LR
 
 每种证件照规格都有独立的裁剪参数（头顶留白、肩部占比、两侧留白），确保成片符合对应的证件照规范。
 
+## ❓ 常见问题
+
+### 运行报错 `AttributeError: module 'mediapipe' has no attribute 'solutions'`？
+
+新版 MediaPipe（0.10.30+ / 1.x）已移除旧版 `mp.solutions` 接口，本项目也已随之全面切换到新版
+**MediaPipe Tasks API**。首次运行时会自动下载 3 个人脸/姿态模型并缓存，无需手动干预：
+
+| 用途 | 缓存文件名 | 大小 |
+| --- | --- | --- |
+| 人脸检测（裁剪 / 增强 / 肩补） | `blaze_face_full_range.tflite` | ~1.1 MB |
+| 人脸关键点（双眼扶正） | `face_landmarker.task` | ~3.8 MB |
+| 姿态关键点（双肩裁剪） | `pose_landmarker_full.task` | ~9.4 MB |
+
+### 模型下载失败 / 离线环境怎么办？
+
+模型下载失败时程序**不会报错**，会自动按整图处理输出，并在结果中提示 ⚠️。要完整使用 AI 构图功能：
+
+1. 联网运行一次，或手动下载上述 3 个模型文件；
+2. 放入默认缓存目录 `~/.photolayout/models`（Windows 为 `C:\Users\<你>\\.photolayout\models`）；
+   也可通过环境变量 `PHOTOLAYOUT_MODELS_DIR` 指定其它目录后直接运行。
+
+模型文件可从
+`https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/`、
+`.../face_landmarker/face_landmarker/float16/latest/`、
+`.../pose_landmarker/pose_landmarker_full/float16/latest/` 下载对应文件。
+
+> 提示：`PHOTOLAYOUT_OFFLINE=1` 可禁止自动联网下载（纯离线或调试用）。
+
+### rembg 打印一大段 onnxruntime CUDA 报错 / 如何让抠图用上 GPU？
+
+rembg 的推理后端（onnxruntime）是可选依赖，本项目**默认安装 CPU 版**
+（`rembg[cpu]`），开箱即用且无 CUDA 噪音。程序会自动探测加速器：
+
+- 安装了 `onnxruntime-gpu` 且系统具备匹配的 CUDA/cuDNN 运行库 → 自动用 GPU 推理；
+- 装了 `onnxruntime-gpu` 但缺 CUDA 运行库（常见报错：缺少 `cublasLt64_*.dll`）
+  → 自动**静默回退 CPU**，只提示一行，不再刷屏报错。
+
+想让抠图用上 GPU（需 NVIDIA 显卡 + CUDA Toolkit，并换装 GPU 后端）：
+
+```bash
+pip uninstall -y onnxruntime
+pip install onnxruntime-gpu
+```
+
+换回 CPU：`pip install onnxruntime`，或重新执行 `pip install -r requirements.txt`。
+GPU 只加速 rembg 抠图推理；人脸/姿态检测模型很小，沿用 CPU 推理以保证兼容性。
+
 ## 📁 项目结构
 
 ```text
@@ -149,20 +196,25 @@ photolayout/
   cli.py                命令行交互和输出文件命名
   config.py             照片规格、相纸尺寸、背景色和排版配置
   layout.py             尺寸缩放、相纸排版、PDF 导出
+  detection.py          MediaPipe Tasks 检测适配层（模型自动下载缓存、失败降级）
+  rembg_session.py      rembg 抠图会话缓存 + GPU/CPU 自动选择
   models.py             共享数据模型
   portrait.py           人脸、关键点、裁剪、增强与肩部补全算法
   service.py            证件照处理流程编排
+  _quiet.py             进程级 stderr 静默工具（压制第三方 C++ 日志）
 tests/
   test_layout.py         无模型依赖的排版测试
   test_portrait_fill.py  构图自检与肩部补全纯函数测试
+  test_detection.py      检测适配层降级与模型目录单测
+  test_rembg_session.py  rembg provider 选择与会话缓存单测
 ```
 
 架构约定：视觉算法放在独立领域模块，由 `service.py` 统一编排；GUI、Web 或批处理入口直接调用服务层，不依赖 CLI 模块。欢迎在此基础上扩展新玩法。
 
 ## 🛠️ 技术栈
 
-- [MediaPipe](https://github.com/google-ai-edge/mediapipe) — 人脸检测、面部网格与姿态关键点
-- [rembg](https://github.com/danielgatis/rembg) — 人像背景移除
+- [MediaPipe](https://github.com/google-ai-edge/mediapipe) — Tasks API 人脸检测、面部关键点与姿态关键点（模型自动下载）
+- [rembg](https://github.com/danielgatis/rembg) — 人像背景移除（默认 CPU，可选 CUDA GPU 加速）
 - [OpenCV](https://opencv.org/) + [Pillow](https://python-pillow.org/) — 图像处理与增强
 - [ReportLab](https://www.reportlab.com/) — 真实物理尺寸的 PDF 导出
 
