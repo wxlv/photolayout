@@ -161,3 +161,39 @@ def whiten_teeth(image: Image.Image, landmarks: list[Point], intensity: float) -
     blend3 = blend[:, :, None]
     result = rgb.astype(np.float32) * (1 - blend3) + whitened.astype(np.float32) * blend3
     return Image.fromarray(result.astype(np.uint8), "RGB")
+
+
+def _displacement_warp(rgb: np.ndarray, control_points: list[tuple[float, float]],
+                       displacements: list[tuple[float, float]], sigma: float) -> np.ndarray:
+    """按控制点位移量，使用高斯加权插值生成局部形变的图像。"""
+    height, width = rgb.shape[:2]
+    grid_x, grid_y = np.meshgrid(
+        np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32)
+    )
+    total_dx = np.zeros((height, width), dtype=np.float32)
+    total_dy = np.zeros((height, width), dtype=np.float32)
+    for (cx, cy), (dx, dy) in zip(control_points, displacements):
+        weight = np.exp(-((grid_x - cx) ** 2 + (grid_y - cy) ** 2) / (2 * sigma ** 2))
+        total_dx += weight * dx
+        total_dy += weight * dy
+
+    map_x = (grid_x - total_dx).astype(np.float32)
+    map_y = (grid_y - total_dy).astype(np.float32)
+    return cv2.remap(rgb, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+
+
+def slim_face(image: Image.Image, landmarks: list[Point], intensity: float) -> Image.Image:
+    """基于下颌关键点位移场的局部 warp（cv2.remap），轻微像素级拉伸。"""
+    rgb = np.array(image.convert("RGB"))
+    if intensity <= 0:
+        return Image.fromarray(rgb, "RGB")
+
+    face_pts = [landmarks[i] for i in FACE_OVAL]
+    face_width = max(p.x for p in face_pts) - min(p.x for p in face_pts)
+    center_x = sum(p.x for p in face_pts) / len(face_pts)
+
+    control_points = [(landmarks[i].x, landmarks[i].y) for i in JAW_INDICES]
+    displacements = [((center_x - x) * 0.08 * intensity, 0.0) for x, _ in control_points]
+
+    warped = _displacement_warp(rgb, control_points, displacements, sigma=max(4.0, face_width * 0.18))
+    return Image.fromarray(warped, "RGB")

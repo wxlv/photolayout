@@ -130,5 +130,28 @@ class WhitenTeethTests(unittest.TestCase):
         np.testing.assert_array_equal(np.array(result), rgb)
 
 
+class SlimFaceTests(unittest.TestCase):
+    def test_zero_intensity_is_identity(self):
+        width, height = 200, 260
+        rgb = np.random.default_rng(3).integers(0, 255, (height, width, 3), dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+
+        result = beauty.slim_face(image, landmarks, 0.0)
+
+        np.testing.assert_array_equal(np.array(result), rgb)
+
+    def test_positive_intensity_changes_image(self):
+        width, height = 200, 260
+        rng = np.random.default_rng(4)
+        rgb = rng.integers(0, 255, (height, width, 3), dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+
+        result = np.array(beauty.slim_face(image, landmarks, 1.0))
+
+        self.assertFalse(np.array_equal(result, rgb))
+
+
 if __name__ == "__main__":
     unittest.main()
