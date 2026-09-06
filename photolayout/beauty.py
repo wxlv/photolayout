@@ -242,7 +242,8 @@ def apply_beauty(image: Image.Image, level: int, enable_reshape: bool) -> tuple[
 
     按顺序执行磨皮/美白/瑕疵柔化（intensity<=0 时整体跳过）；
     enable_reshape=True 时追加牙齿美白 + 瘦脸 + 大眼（复用同一强度值），
-    并固定附带合规告警。
+    并固定附带合规告警。任何处理过程中的异常均被捕获并降级为原图返回，
+    不得让 apply_beauty 抛出异常影响成图流程。
     """
     warnings: list[str] = []
     _, intensity = BEAUTY_LEVELS.get(level, BEAUTY_LEVELS[DEFAULT_BEAUTY_LEVEL_ID])
@@ -259,22 +260,26 @@ def apply_beauty(image: Image.Image, level: int, enable_reshape: bool) -> tuple[
         warnings.append("未检测到清晰人脸关键点，已跳过美颜处理")
         return image, warnings
 
-    result = rgb_image
-    if intensity > 0:
-        mask = build_skin_mask(mesh, (height, width))
-        result = smooth_and_whiten_skin(result, mask, intensity)
-        result = reduce_blemishes(result, mesh, intensity)
+    try:
+        result = rgb_image
+        if intensity > 0:
+            mask = build_skin_mask(mesh, (height, width))
+            result = smooth_and_whiten_skin(result, mask, intensity)
+            result = reduce_blemishes(result, mesh, intensity)
 
-    if enable_reshape:
-        result = whiten_teeth(result, mesh, intensity)
-        result = slim_face(result, mesh, intensity)
-        result = enlarge_eyes(result, mesh, intensity)
-        warnings.append(
-            "已启用五官微调（瘦脸/大眼/牙齿美白），此类照片可能不符合护照/身份证等官方证件照"
-            "『真实反映本人相貌』的要求，仅建议用于简历照等非官方场景。"
-        )
+        if enable_reshape:
+            result = whiten_teeth(result, mesh, intensity)
+            result = slim_face(result, mesh, intensity)
+            result = enlarge_eyes(result, mesh, intensity)
+            warnings.append(
+                "已启用五官微调（瘦脸/大眼/牙齿美白），此类照片可能不符合护照/身份证等官方证件照"
+                "『真实反映本人相貌』的要求，仅建议用于简历照等非官方场景。"
+            )
 
-    if original_mode == "RGBA":
-        result = result.convert("RGBA")
-        result.putalpha(image.getchannel("A"))
-    return result, warnings
+        if original_mode == "RGBA":
+            result = result.convert("RGBA")
+            result.putalpha(image.getchannel("A"))
+        return result, warnings
+    except Exception as exc:
+        logger.warning("美颜处理失败，已跳过并返回原图：%s", exc)
+        return image, warnings + ["美颜处理过程中出现异常，已跳过美颜处理"]

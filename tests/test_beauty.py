@@ -216,6 +216,20 @@ class ApplyBeautyTests(unittest.TestCase):
             warnings,
         )
 
+    def test_nan_mesh_point_degrades_to_original_without_raising(self):
+        width, height = 200, 260
+        rgb = np.full((height, width, 3), 130, dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+        landmarks[beauty.FACE_OVAL[0]] = Point(float("nan"), landmarks[beauty.FACE_OVAL[0]].y)
+
+        with mock.patch.object(beauty.detection, "detect_face_mesh", return_value=landmarks):
+            result, warnings = beauty.apply_beauty(image, 1, False)
+
+        self.assertIsInstance(result, Image.Image)
+        self.assertEqual(result.size, image.size)
+        self.assertTrue(any(w for w in warnings))
+
     def test_rgba_input_preserves_alpha(self):
         width, height = 200, 260
         rgb = np.full((height, width, 3), 130, dtype=np.uint8)
