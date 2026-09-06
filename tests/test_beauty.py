@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import numpy as np
 from PIL import Image
@@ -174,6 +175,60 @@ class EnlargeEyesTests(unittest.TestCase):
         result = np.array(beauty.enlarge_eyes(image, landmarks, 1.0))
 
         self.assertFalse(np.array_equal(result, rgb))
+
+
+class ApplyBeautyTests(unittest.TestCase):
+    def test_level_zero_no_reshape_returns_original_without_detection(self):
+        width, height = 200, 260
+        rgb = np.random.default_rng(7).integers(0, 255, (height, width, 3), dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+
+        with mock.patch.object(beauty.detection, "detect_face_mesh") as mocked:
+            result, warnings = beauty.apply_beauty(image, 0, False)
+
+        mocked.assert_not_called()
+        np.testing.assert_array_equal(np.array(result), rgb)
+        self.assertEqual(warnings, [])
+
+    def test_mesh_none_returns_original_with_warning(self):
+        width, height = 200, 260
+        rgb = np.full((height, width, 3), 130, dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+
+        with mock.patch.object(beauty.detection, "detect_face_mesh", return_value=None):
+            result, warnings = beauty.apply_beauty(image, 1, False)
+
+        np.testing.assert_array_equal(np.array(result.convert("RGB")), rgb)
+        self.assertEqual(warnings, ["未检测到清晰人脸关键点，已跳过美颜处理"])
+
+    def test_enable_reshape_appends_compliance_warning(self):
+        width, height = 200, 260
+        rgb = np.full((height, width, 3), 130, dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+
+        with mock.patch.object(beauty.detection, "detect_face_mesh", return_value=landmarks):
+            _, warnings = beauty.apply_beauty(image, 1, True)
+
+        self.assertIn(
+            "已启用五官微调（瘦脸/大眼/牙齿美白），此类照片可能不符合护照/身份证等官方证件照"
+            "『真实反映本人相貌』的要求，仅建议用于简历照等非官方场景。",
+            warnings,
+        )
+
+    def test_rgba_input_preserves_alpha(self):
+        width, height = 200, 260
+        rgb = np.full((height, width, 3), 130, dtype=np.uint8)
+        alpha = np.full((height, width, 1), 200, dtype=np.uint8)
+        rgba = np.concatenate([rgb, alpha], axis=2)
+        image = Image.fromarray(rgba, "RGBA")
+        landmarks = _make_face_landmarks(width, height)
+
+        with mock.patch.object(beauty.detection, "detect_face_mesh", return_value=landmarks):
+            result, _ = beauty.apply_beauty(image, 1, False)
+
+        self.assertEqual(result.mode, "RGBA")
+        np.testing.assert_array_equal(np.array(result.getchannel("A")), alpha[:, :, 0])
 
 
 if __name__ == "__main__":
