@@ -8,6 +8,8 @@ from pathlib import Path
 
 from .config import (
     BACKGROUND_COLORS,
+    BEAUTY_LEVELS,
+    DEFAULT_BEAUTY_LEVEL_ID,
     DEFAULT_PAPER_SIZE_ID,
     DEFAULT_PHOTO_SIZE_ID,
     DPI,
@@ -74,11 +76,25 @@ def main(argv: list[str] | None = None) -> None:
     background_name, background_color = BACKGROUND_COLORS[
         choose_from_menu("请选择背景颜色：", BACKGROUND_COLORS)
     ]
+    beauty_choice = choose_from_menu(
+        "请选择美颜强度：",
+        {k: v[0] for k, v in BEAUTY_LEVELS.items()},
+        default=DEFAULT_BEAUTY_LEVEL_ID,
+    )
+    reshape_choice = choose_from_menu(
+        "是否开启五官微调（瘦脸/大眼/牙齿美白）？",
+        {1: "否（默认，推荐用于官方证件照）", 2: "是（仅建议非官方场景，如简历照）"},
+        default=1,
+    )
+    enable_reshape = reshape_choice == 2
     paper_size = PAPER_SIZES[
         choose_from_menu("请选择相纸尺寸：", PAPER_SIZES, default=DEFAULT_PAPER_SIZE_ID)
     ]
     print("\n开始处理...")
-    photo_result = process_photo(input_path, photo_size, background_color)
+    photo_result = process_photo(
+        input_path, photo_size, background_color,
+        beauty_level=beauty_choice, enable_facial_reshape=enable_reshape,
+    )
     processed = photo_result.image
 
     photo_name = _safe_filename(photo_size.name)

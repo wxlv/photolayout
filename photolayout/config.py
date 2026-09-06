@@ -46,3 +46,11 @@ MARGIN_MM = 5
 MIN_SHOULDER_WIDTH_RATIO = 0.72
 # 肩部带横向拉伸的最大倍率，防止衣服失真
 MAX_SHOULDER_STRETCH = 1.35
+
+BEAUTY_LEVELS: dict[int, tuple[str, float]] = {
+    0: ("关闭", 0.0),
+    1: ("自然", 0.35),
+    2: ("标准", 0.65),
+    3: ("较强", 1.0),
+}
+DEFAULT_BEAUTY_LEVEL_ID = 1

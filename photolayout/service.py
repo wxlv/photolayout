@@ -7,7 +7,8 @@ from PIL import Image, ImageEnhance
 from rembg import remove
 
 from . import detection
-from .config import MAX_SHOULDER_STRETCH, MIN_SHOULDER_WIDTH_RATIO
+from . import beauty
+from .config import DEFAULT_BEAUTY_LEVEL_ID, MAX_SHOULDER_STRETCH, MIN_SHOULDER_WIDTH_RATIO
 from .models import PhotoResult, PhotoSize
 from .rembg_session import get_session
 from .portrait import (
@@ -24,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 def process_photo(input_path: str | Path, photo_size: PhotoSize,
                   background_color: tuple[int, int, int] = (255, 255, 255),
-                  brightness: float = 1.05, contrast: float = 1.08) -> PhotoResult:
+                  brightness: float = 1.05, contrast: float = 1.08,
+                  beauty_level: int = DEFAULT_BEAUTY_LEVEL_ID,
+                  enable_facial_reshape: bool = False) -> PhotoResult:
     """生成指定尺寸和背景色的单张证件照，返回照片与提示信息。"""
     warnings: list[str] = []
     image = Image.open(input_path).convert("RGBA")
@@ -41,6 +44,9 @@ def process_photo(input_path: str | Path, photo_size: PhotoSize,
         photo_size.expand_bottom, photo_size.expand_side,
         warnings=warnings,
     )
+    logger.info("正在进行美颜处理...")
+    image, beauty_warnings = beauty.apply_beauty(image, beauty_level, enable_facial_reshape)
+    warnings.extend(beauty_warnings)
     logger.info("正在去除背景...")
     foreground = remove(
         image, session=get_session(), alpha_matting=True,
