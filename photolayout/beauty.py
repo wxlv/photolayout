@@ -197,3 +197,40 @@ def slim_face(image: Image.Image, landmarks: list[Point], intensity: float) -> I
 
     warped = _displacement_warp(rgb, control_points, displacements, sigma=max(4.0, face_width * 0.18))
     return Image.fromarray(warped, "RGB")
+
+
+def enlarge_eyes(image: Image.Image, landmarks: list[Point], intensity: float) -> Image.Image:
+    """基于眼周关键点的局部径向 warp（放大瞳孔周围区域）。"""
+    rgb = np.array(image.convert("RGB"))
+    if intensity <= 0:
+        return Image.fromarray(rgb, "RGB")
+    height, width = rgb.shape[:2]
+    grid_x, grid_y = np.meshgrid(
+        np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32)
+    )
+    map_x = grid_x.copy()
+    map_y = grid_y.copy()
+
+    for eye_indices in (LEFT_EYE, RIGHT_EYE):
+        xs = [landmarks[i].x for i in eye_indices]
+        ys = [landmarks[i].y for i in eye_indices]
+        center_x = (min(xs) + max(xs)) / 2.0
+        center_y = (min(ys) + max(ys)) / 2.0
+        eye_radius = max(max(xs) - min(xs), max(ys) - min(ys)) / 2.0
+        influence_radius = max(1.0, eye_radius * 2.2)
+
+        dx = grid_x - center_x
+        dy = grid_y - center_y
+        dist = np.sqrt(dx ** 2 + dy ** 2)
+        within = dist < influence_radius
+        falloff = np.clip(1.0 - dist / influence_radius, 0.0, 1.0) ** 2
+        strength = 0.35 * intensity * falloff
+        scale = np.where(within, 1.0 / (1.0 + strength), 1.0)
+        map_x = np.where(within, center_x + dx * scale, map_x)
+        map_y = np.where(within, center_y + dy * scale, map_y)
+
+    warped = cv2.remap(
+        rgb, map_x.astype(np.float32), map_y.astype(np.float32),
+        interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+    )
+    return Image.fromarray(warped, "RGB")
