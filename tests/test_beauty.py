@@ -107,5 +107,28 @@ class ReduceBlemishesTests(unittest.TestCase):
         self.assertFalse(np.array_equal(result, rgb))
 
 
+class WhitenTeethTests(unittest.TestCase):
+    def test_zero_intensity_is_identity(self):
+        width, height = 200, 260
+        rgb = np.random.default_rng(2).integers(0, 255, (height, width, 3), dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+
+        result = beauty.whiten_teeth(image, landmarks, 0.0)
+
+        np.testing.assert_array_equal(np.array(result), rgb)
+
+    def test_closed_mouth_is_skipped(self):
+        width, height = 200, 260
+        rgb = np.full((height, width, 3), 150, dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+        # 用 fixture 里嘴唇内外轮廓比例（inner 高度 0.018 << outer 高度 0.035）天然模拟"闭嘴"
+
+        result = beauty.whiten_teeth(image, landmarks, 1.0)
+
+        np.testing.assert_array_equal(np.array(result), rgb)
+
+
 if __name__ == "__main__":
     unittest.main()

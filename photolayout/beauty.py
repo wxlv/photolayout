@@ -132,3 +132,32 @@ def reduce_blemishes(image: Image.Image, landmarks: list[Point], intensity: floa
 
     corrected = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
     return Image.fromarray(corrected, "RGB")
+
+
+def whiten_teeth(image: Image.Image, landmarks: list[Point], intensity: float) -> Image.Image:
+    """嘴唇内轮廓关键点抠出牙齿区域，HSV 降饱和 + 提亮；嘴部闭合时跳过。"""
+    rgb = np.array(image.convert("RGB"))
+    if intensity <= 0:
+        return Image.fromarray(rgb, "RGB")
+    height, width = rgb.shape[:2]
+
+    inner_pts = np.array([[landmarks[i].x, landmarks[i].y] for i in LIPS_INNER], dtype=np.int32)
+    _, _, inner_w, inner_h = cv2.boundingRect(inner_pts)
+    outer_pts = np.array([[landmarks[i].x, landmarks[i].y] for i in LIPS_OUTER], dtype=np.int32)
+    _, _, _, outer_h = cv2.boundingRect(outer_pts)
+    if outer_h <= 0 or inner_h < outer_h * 0.6:
+        return Image.fromarray(rgb, "RGB")
+
+    mouth_mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(mouth_mask, cv2.convexHull(inner_pts), 255)
+    mouth_mask = cv2.GaussianBlur(mouth_mask, (0, 0), max(1.0, inner_w * 0.05))
+    blend = np.clip(mouth_mask.astype(np.float32) / 255.0 * intensity, 0.0, 1.0)
+
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - blend * 0.5), 0, 255)
+    hsv[:, :, 2] = np.clip(hsv[:, :, 2] + blend * 25.0, 0, 255)
+    whitened = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+
+    blend3 = blend[:, :, None]
+    result = rgb.astype(np.float32) * (1 - blend3) + whitened.astype(np.float32) * blend3
+    return Image.fromarray(result.astype(np.uint8), "RGB")
