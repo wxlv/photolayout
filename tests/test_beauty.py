@@ -63,5 +63,27 @@ class BuildSkinMaskTests(unittest.TestCase):
         self.assertLess(mask[eye_y, eye_x], 0.5)
 
 
+class SmoothAndWhitenSkinTests(unittest.TestCase):
+    def test_zero_intensity_is_identity(self):
+        width, height = 60, 80
+        rgb = np.random.default_rng(0).integers(0, 255, (height, width, 3), dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        mask = np.ones((height, width), dtype=np.float32)
+
+        result = beauty.smooth_and_whiten_skin(image, mask, 0.0)
+
+        np.testing.assert_array_equal(np.array(result), rgb)
+
+    def test_positive_intensity_brightens_masked_region(self):
+        width, height = 60, 80
+        rgb = np.full((height, width, 3), 120, dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        mask = np.ones((height, width), dtype=np.float32)
+
+        result = np.array(beauty.smooth_and_whiten_skin(image, mask, 1.0))
+
+        self.assertGreater(result.mean(), rgb.mean())
+
+
 if __name__ == "__main__":
     unittest.main()

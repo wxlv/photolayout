@@ -58,3 +58,20 @@ def build_skin_mask(landmarks: list[Point], shape: tuple[int, int]) -> np.ndarra
     skin_mask = cv2.bitwise_and(face_mask, cv2.bitwise_not(exclude_mask))
     skin_mask = cv2.GaussianBlur(skin_mask, (0, 0), max(2.0, width * 0.01))
     return skin_mask.astype(np.float32) / 255.0
+
+
+def smooth_and_whiten_skin(image: Image.Image, mask: np.ndarray, intensity: float) -> Image.Image:
+    """双边滤波磨皮 + LAB 空间 L 提升/b 降低美白，按蒙版强度混合。"""
+    rgb = np.array(image.convert("RGB"))
+    if intensity <= 0:
+        return Image.fromarray(rgb, "RGB")
+
+    smoothed = cv2.bilateralFilter(rgb, d=9, sigmaColor=45, sigmaSpace=45)
+    lab = cv2.cvtColor(smoothed, cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab[:, :, 0] = np.clip(lab[:, :, 0] + 18.0 * intensity, 0, 255)
+    lab[:, :, 2] = np.clip(lab[:, :, 2] - 6.0 * intensity, 0, 255)
+    whitened = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
+
+    blend = np.clip(mask * intensity, 0.0, 1.0)[:, :, None]
+    result = rgb.astype(np.float32) * (1 - blend) + whitened.astype(np.float32) * blend
+    return Image.fromarray(result.astype(np.uint8), "RGB")
