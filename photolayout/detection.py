@@ -249,6 +249,36 @@ def detect_eye_line(rgb: np.ndarray) -> tuple[Point, Point] | None:
             landmarker.close()
 
 
+def detect_face_mesh(rgb: np.ndarray) -> list[Point] | None:
+    """返回 468 点全脸网格像素坐标；未检测到人脸或降级时返回 None。"""
+    landmarker = _open_detector(
+        FACE_LANDMARKER_MODEL,
+        lambda path: vision.FaceLandmarker.create_from_options(
+            vision.FaceLandmarkerOptions(
+                base_options=mp_tasks.BaseOptions(model_asset_path=path),
+                num_faces=1,
+                min_face_detection_confidence=0.5,
+            )
+        ),
+    )
+    if landmarker is None:
+        return None
+    try:
+        with silence_stderr():
+            result = landmarker.detect(_to_image(rgb))
+            if not result.face_landmarks:
+                return None
+            points = result.face_landmarks[0]
+            height, width = rgb.shape[:2]
+            return [Point(p.x * width, p.y * height) for p in points]
+    except Exception as exc:
+        logger.warning("面部关键点检测失败：%s", exc)
+        return None
+    finally:
+        with silence_stderr():
+            landmarker.close()
+
+
 def detect_shoulders(rgb: np.ndarray) -> tuple[Point, Point] | None:
     """检测双肩像素坐标（左右肩可见度均达标）；否则返回 None。"""
     landmarker = _open_detector(

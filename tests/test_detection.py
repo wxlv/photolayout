@@ -73,6 +73,10 @@ class DegradeTests(unittest.TestCase):
             self.assertIsNone(detection.detect_eye_line(self._blank_rgb()))
             self.assertIsNone(detection.detect_shoulders(self._blank_rgb()))
 
+    def test_detect_face_mesh_returns_none_when_offline(self) -> None:
+        with mock.patch.dict(os.environ, self.env):
+            self.assertIsNone(detection.detect_face_mesh(self._blank_rgb()))
+
     def test_no_retry_after_first_failure(self) -> None:
         with mock.patch.dict(os.environ, self.env):
             detection.detect_faces(self._blank_rgb())
