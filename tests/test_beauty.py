@@ -85,5 +85,27 @@ class SmoothAndWhitenSkinTests(unittest.TestCase):
         self.assertGreater(result.mean(), rgb.mean())
 
 
+class ReduceBlemishesTests(unittest.TestCase):
+    def test_zero_intensity_is_identity(self):
+        width, height = 200, 260
+        rgb = np.random.default_rng(1).integers(0, 255, (height, width, 3), dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+
+        result = beauty.reduce_blemishes(image, landmarks, 0.0)
+
+        np.testing.assert_array_equal(np.array(result), rgb)
+
+    def test_positive_intensity_changes_image(self):
+        width, height = 200, 260
+        rgb = np.full((height, width, 3), 150, dtype=np.uint8)
+        image = Image.fromarray(rgb, "RGB")
+        landmarks = _make_face_landmarks(width, height)
+
+        result = np.array(beauty.reduce_blemishes(image, landmarks, 1.0))
+
+        self.assertFalse(np.array_equal(result, rgb))
+
+
 if __name__ == "__main__":
     unittest.main()

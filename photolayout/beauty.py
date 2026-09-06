@@ -75,3 +75,60 @@ def smooth_and_whiten_skin(image: Image.Image, mask: np.ndarray, intensity: floa
     blend = np.clip(mask * intensity, 0.0, 1.0)[:, :, None]
     result = rgb.astype(np.float32) * (1 - blend) + whitened.astype(np.float32) * blend
     return Image.fromarray(result.astype(np.uint8), "RGB")
+
+
+def _ellipse_mask(shape: tuple[int, int], center: tuple[float, float],
+                  axes: tuple[float, float], blur_sigma: float) -> np.ndarray:
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.ellipse(
+        mask, (int(center[0]), int(center[1])),
+        (max(1, int(axes[0])), max(1, int(axes[1]))),
+        0, 0, 360, 255, -1,
+    )
+    mask = cv2.GaussianBlur(mask, (0, 0), max(1.0, blur_sigma))
+    return mask.astype(np.float32) / 255.0
+
+
+def reduce_blemishes(image: Image.Image, landmarks: list[Point], intensity: float) -> Image.Image:
+    """眼下区域局部提亮（黑眼圈）、两颊/鼻翼局部降红（泛红），色彩校正，不做结构性修复。"""
+    rgb = np.array(image.convert("RGB"))
+    if intensity <= 0:
+        return Image.fromarray(rgb, "RGB")
+    height, width = rgb.shape[:2]
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+
+    dark_circle_mask = np.zeros((height, width), dtype=np.float32)
+    for eye_indices in (LEFT_EYE, RIGHT_EYE):
+        xs = [landmarks[i].x for i in eye_indices]
+        ys = [landmarks[i].y for i in eye_indices]
+        eye_w = max(xs) - min(xs)
+        eye_h = max(ys) - min(ys)
+        center = ((min(xs) + max(xs)) / 2.0, max(ys) + eye_h * 0.5)
+        dark_circle_mask = np.maximum(
+            dark_circle_mask,
+            _ellipse_mask((height, width), center, (eye_w * 0.55, eye_h * 0.85), max(2.0, eye_w * 0.15)),
+        )
+
+    face_pts = [landmarks[i] for i in FACE_OVAL]
+    face_width = max(p.x for p in face_pts) - min(p.x for p in face_pts)
+    redness_mask = np.zeros((height, width), dtype=np.float32)
+    left_eye_outer = landmarks[LEFT_EYE[0]]
+    right_eye_outer = landmarks[RIGHT_EYE[0]]
+    mouth_a = landmarks[LIPS_OUTER[0]]
+    mouth_b = landmarks[LIPS_OUTER[10]]
+    for eye_pt, mouth_pt in ((right_eye_outer, mouth_a), (left_eye_outer, mouth_b)):
+        center = ((eye_pt.x + mouth_pt.x) / 2.0, (eye_pt.y + mouth_pt.y) / 2.0)
+        radius = max(4.0, face_width * 0.12)
+        redness_mask = np.maximum(
+            redness_mask,
+            _ellipse_mask((height, width), center, (radius, radius), radius * 0.5),
+        )
+
+    blend_dark = np.clip(dark_circle_mask * intensity, 0.0, 1.0)
+    lab[:, :, 0] = np.clip(lab[:, :, 0] + blend_dark * 14.0, 0, 255)
+
+    blend_red = np.clip(redness_mask * intensity, 0.0, 1.0)
+    lab[:, :, 1] = np.clip(lab[:, :, 1] * (1 - blend_red * 0.5) + 128.0 * (blend_red * 0.5), 0, 255)
+
+    corrected = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
+    return Image.fromarray(corrected, "RGB")
