@@ -9,6 +9,8 @@ import gradio as gr
 from .cli import _safe_filename
 from .config import (
     BACKGROUND_COLORS,
+    BEAUTY_LEVELS,
+    DEFAULT_BEAUTY_LEVEL_ID,
     DEFAULT_PAPER_SIZE_ID,
     DEFAULT_PHOTO_SIZE_ID,
     DPI,
@@ -118,7 +120,7 @@ _DEFAULT_PAPER_LABEL = _paper_label(DEFAULT_PAPER_SIZE_ID, PAPER_SIZES[DEFAULT_P
 _DEFAULT_BG_LABEL = BACKGROUND_COLORS[1][0]  # 白色
 
 
-def generate(image_path, photo_label, bg_label, paper_label):
+def generate(image_path, photo_label, bg_label, paper_label, beauty_label, enable_reshape):
     """处理上传照片，返回单张预览、排版预览、PDF 路径与告警文本。"""
     if image_path is None:
         return None, None, None, "⚠️ 请先上传一张照片。"
@@ -126,6 +128,10 @@ def generate(image_path, photo_label, bg_label, paper_label):
     photo_size = PHOTO_SIZES[_PHOTO_CHOICES[photo_label]]
     background_color = BACKGROUND_COLORS[_BG_CHOICES[bg_label]][1]
     paper_size = PAPER_SIZES[_PAPER_CHOICES[paper_label]]
+    beauty_level = next(
+        (k for k, v in BEAUTY_LEVELS.items() if v[0] == beauty_label),
+        DEFAULT_BEAUTY_LEVEL_ID,
+    )
 
     from .service import process_photo  # 延迟导入，加快界面启动
 
@@ -133,7 +139,13 @@ def generate(image_path, photo_label, bg_label, paper_label):
     photo_name = _safe_filename(photo_size.name)
     paper_name = _safe_filename(paper_size.name)
 
-    photo_result = process_photo(image_path, photo_size, background_color)
+    photo_result = process_photo(
+        image_path,
+        photo_size,
+        background_color,
+        beauty_level=beauty_level,
+        enable_facial_reshape=enable_reshape,
+    )
     processed = photo_result.image
 
     single_path = tmp_dir / f"single_{photo_name}.jpg"
@@ -181,6 +193,16 @@ def build_ui() -> gr.Blocks:
                     choices=list(_BG_CHOICES.keys()),
                     value=_DEFAULT_BG_LABEL,
                 )
+                beauty_dd = gr.Dropdown(
+                    label="美颜强度",
+                    choices=[v[0] for v in BEAUTY_LEVELS.values()],
+                    value=BEAUTY_LEVELS[DEFAULT_BEAUTY_LEVEL_ID][0],
+                )
+                reshape_cb = gr.Checkbox(
+                    label="五官微调（瘦脸/大眼/牙齿美白）",
+                    value=False,
+                    info="⚠️ 可能不符合官方证件照真实性要求，仅建议非官方场景使用",
+                )
                 paper_dd = gr.Dropdown(
                     label="相纸尺寸",
                     choices=list(_PAPER_CHOICES.keys()),
@@ -206,7 +228,7 @@ def build_ui() -> gr.Blocks:
 
         run_btn.click(
             fn=generate,
-            inputs=[input_image, photo_dd, bg_dd, paper_dd],
+            inputs=[input_image, photo_dd, bg_dd, paper_dd, beauty_dd, reshape_cb],
             outputs=[single_out, layout_out, pdf_out, warnings_out],
             show_progress=True,
         )
